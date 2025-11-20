@@ -31,7 +31,7 @@ AI-powered stock market app for tracking real-time prices, setting alerts, and e
 
 ```bash
 git clone <repository-url>
-cd signalist_stock-tracker-app
+cd sharebahadur_stock-tracker-app
 npm install
 ```
 

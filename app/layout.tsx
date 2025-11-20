@@ -14,8 +14,24 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Signalist",
+  title: "Share Bahadur",
   description: "Track real-time stock prices, get personalized alerts and explore detailed company insights.",
+  icons: {
+    icon: [
+      { url: "/assets/favicons/favicon.ico" },
+      { url: "/assets/favicons/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/assets/favicons/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: [
+      { url: "/assets/favicons/apple-touch-icon.png" },
+    ],
+    other: [
+      {
+        rel: "manifest",
+        url: "/assets/favicons/site.webmanifest",
+      },
+    ],
+  },
 };
 
 export default function RootLayout({

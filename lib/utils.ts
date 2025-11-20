@@ -104,8 +104,8 @@ export const formatChangePercent = (changePercent?: number) => {
 };
 
 export const getChangeColorClass = (changePercent?: number) => {
-  if (!changePercent) return 'text-gray-400';
-  return changePercent > 0 ? 'text-green-500' : 'text-red-500';
+  if (!changePercent) return 'text-[#6C757D]'; // Muted Gray
+  return changePercent > 0 ? 'text-[#28A745]' : 'text-[#D9534F]'; // Market Green : Dhaka Red
 };
 
 export const formatPrice = (price: number) => {

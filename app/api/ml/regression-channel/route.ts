@@ -1,90 +1,112 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateRegressionChannel, formatRegressionEquation } from '@/lib/ml/linear-regression';
+import YahooFinanceImport from 'yahoo-finance2';
 
-const ALPHA_VANTAGE_BASE_URL = 'https://www.alphavantage.co/query';
+// Initialize Yahoo Finance v3 API
+const yahooFinance = new YahooFinanceImport({ 
+  suppressNotices: ['ripHistorical'] // Suppress deprecation warnings
+});
 
 /**
- * Fetch historical candle data from Alpha Vantage API
+ * Fetch historical candle data from Yahoo Finance API
  * @param symbol - Stock symbol (e.g., "AAPL")
  * @param days - Number of days to fetch (default 90)
  */
 async function fetchHistoricalData(symbol: string, days: number = 90) {
-  const apiKey = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY;
-  
-  if (!apiKey) {
-    throw new Error('Alpha Vantage API key not configured');
-  }
+  try {
+    // Calculate date range
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days - 5); // Add buffer days to ensure we get enough data
 
-  // Determine output size based on days requested
-  // Alpha Vantage: compact = last 100 data points, full = 20+ years
-  const outputsize = days > 100 ? 'full' : 'compact';
+    // Fetch historical data from Yahoo Finance using chart API (historical is deprecated)
+    const queryOptions = {
+      period1: startDate,
+      period2: endDate,
+      interval: '1d' as const,
+    };
 
-  const url = `${ALPHA_VANTAGE_BASE_URL}?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}&outputsize=${outputsize}`;
+    // Note: Using historical() which internally maps to chart() in v3
+    const result: any = await yahooFinance.historical(symbol, queryOptions);
 
-  const response = await fetch(url, { 
-    cache: 'no-store',
-    next: { revalidate: 0 }
-  });
+    if (!result || result.length === 0) {
+      throw new Error('No historical data available for this symbol');
+    }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to fetch historical data: ${response.status} - ${errorText}`);
-  }
+    // Sort by date (oldest to newest) - Yahoo Finance returns in chronological order
+    result.sort((a: any, b: any) => a.date.getTime() - b.date.getTime());
 
-  const data = await response.json();
+    // Limit to exactly requested number of days (take the most recent ones)
+    const limitedResult = result.slice(-days);
 
-  // Check for API errors
-  if (data['Error Message']) {
-    throw new Error(`Alpha Vantage API Error: ${data['Error Message']}`);
-  }
+    // Extract data arrays in chronological order (oldest to newest)
+    const timestamps: number[] = [];
+    const closePrices: number[] = [];
+    const highPrices: number[] = [];
+    const lowPrices: number[] = [];
+    const openPrices: number[] = [];
+    const volumes: number[] = [];
 
-  if (data['Note']) {
-    throw new Error('API rate limit reached. Please try again later.');
-  }
+    for (const dayData of limitedResult) {
+      // Validate that we have all required data
+      if (
+        dayData.close === null || 
+        dayData.close === undefined ||
+        dayData.high === null || 
+        dayData.high === undefined ||
+        dayData.low === null || 
+        dayData.low === undefined ||
+        dayData.open === null ||
+        dayData.open === undefined
+      ) {
+        console.warn('Skipping incomplete data point:', dayData.date);
+        continue; // Skip incomplete data points
+      }
 
-  const timeSeries = data['Time Series (Daily)'];
-  
-  if (!timeSeries || Object.keys(timeSeries).length === 0) {
-    throw new Error('No historical data available for this symbol');
-  }
+      timestamps.push(dayData.date.getTime() / 1000); // Convert to Unix timestamp
+      openPrices.push(dayData.open);
+      highPrices.push(dayData.high);
+      lowPrices.push(dayData.low);
+      closePrices.push(dayData.close);
+      volumes.push(dayData.volume || 0);
+    }
 
-  // Parse and sort data by date (most recent first)
-  const dates = Object.keys(timeSeries).sort((a, b) => 
-    new Date(b).getTime() - new Date(a).getTime()
-  );
+    // Validate we collected enough valid data
+    if (closePrices.length === 0) {
+      throw new Error(`No valid price data found for ${symbol}. The symbol may be delisted or have incomplete data.`);
+    }
 
-  // Limit to requested number of days
-  const limitedDates = dates.slice(0, days);
+    console.log(`Processed ${closePrices.length} valid data points for ${symbol}`);
 
-  // Extract data arrays (reverse to get chronological order - oldest to newest)
-  const timestamps: number[] = [];
-  const closePrices: number[] = [];
-  const highPrices: number[] = [];
-  const lowPrices: number[] = [];
-  const openPrices: number[] = [];
-  const volumes: number[] = [];
-
-  // Reverse to get chronological order (oldest to newest)
-  for (let i = limitedDates.length - 1; i >= 0; i--) {
-    const date = limitedDates[i];
-    const dayData = timeSeries[date];
+    return {
+      timestamps,
+      closePrices,
+      highPrices,
+      lowPrices,
+      openPrices,
+      volumes,
+    };
+  } catch (error) {
+    console.error(`Yahoo Finance fetch error for ${symbol}:`, error);
     
-    timestamps.push(new Date(date).getTime() / 1000); // Convert to Unix timestamp
-    openPrices.push(parseFloat(dayData['1. open']));
-    highPrices.push(parseFloat(dayData['2. high']));
-    lowPrices.push(parseFloat(dayData['3. low']));
-    closePrices.push(parseFloat(dayData['4. close']));
-    volumes.push(parseInt(dayData['5. volume']));
+    if (error instanceof Error) {
+      // Handle Yahoo Finance specific errors
+      if (error.message.includes('No data found') || 
+          error.message.includes('Quote not found') ||
+          error.message.includes('Invalid cookie')) {
+        throw new Error(`Invalid stock symbol: ${symbol}. Please verify the ticker symbol is correct.`);
+      }
+      if (error.message.includes('Not Found') || error.message.includes('404')) {
+        throw new Error(`Stock symbol not found: ${symbol}. The symbol may be delisted or incorrect.`);
+      }
+      if (error.message.includes('Too Many Requests') || error.message.includes('429')) {
+        throw new Error('Yahoo Finance rate limit reached. Please try again in a few moments.');
+      }
+      // Re-throw with more context
+      throw new Error(`Failed to fetch data for ${symbol}: ${error.message}`);
+    }
+    throw new Error(`Failed to fetch historical data from Yahoo Finance for ${symbol}`);
   }
-
-  return {
-    timestamps,
-    closePrices,
-    highPrices,
-    lowPrices,
-    openPrices,
-    volumes,
-  };
 }
 
 /**
@@ -92,9 +114,10 @@ async function fetchHistoricalData(symbol: string, days: number = 90) {
  * Query params: symbol (required), days (optional, default 90)
  */
 export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const symbol = searchParams.get('symbol');
+  
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const symbol = searchParams.get('symbol');
     const daysParam = searchParams.get('days');
     const days = daysParam ? parseInt(daysParam, 10) : 90;
 
@@ -114,12 +137,18 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch historical data
+    console.log(`Fetching ${days} days of data for ${symbol.toUpperCase()}...`);
     const historicalData = await fetchHistoricalData(symbol.toUpperCase(), days);
+    console.log(`Received ${historicalData.closePrices.length} data points`);
 
     // Validate we have enough data
     if (historicalData.closePrices.length < 10) {
       return NextResponse.json(
-        { error: 'Insufficient historical data for analysis (minimum 10 days required)' },
+        { 
+          error: 'Insufficient historical data for analysis',
+          details: `Only ${historicalData.closePrices.length} days of data available. Minimum 10 days required.`,
+          symbol: symbol.toUpperCase()
+        },
         { status: 400 }
       );
     }
@@ -184,12 +213,18 @@ export async function GET(request: NextRequest) {
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     
+    // Determine appropriate status code
+    const isClientError = errorMessage.includes('Invalid stock symbol') || 
+                         errorMessage.includes('not found') ||
+                         errorMessage.includes('No historical data');
+    
     return NextResponse.json(
       { 
         error: 'Failed to calculate regression channel',
         details: errorMessage,
+        symbol: searchParams.get('symbol')?.toUpperCase(),
       },
-      { status: 500 }
+      { status: isClientError ? 404 : 500 }
     );
   }
 }

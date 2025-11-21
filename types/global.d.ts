@@ -140,10 +140,13 @@ declare global {
         symbol: string;
         company: string;
         addedAt: Date;
+        addedAtPrice?: number;
         currentPrice?: number;
         changePercent?: number;
+        changeSinceAdded?: number;
         priceFormatted?: string;
         changeFormatted?: string;
+        changeSinceAddedFormatted?: string;
         marketCap?: string;
         peRatio?: string;
     };
@@ -214,6 +217,47 @@ declare global {
         alertType: 'upper' | 'lower';
         threshold: number;
         changePercent?: number;
+    };
+
+    // Linear Regression Channel Types
+    type RegressionChannelResponse = {
+        symbol: string;
+        dataPoints: number;
+        daysAnalyzed: number;
+        regression: {
+            equation: string;
+            slope: number;
+            intercept: number;
+            rSquared: number;
+        };
+        currentAnalysis: {
+            currentPrice: number;
+            predictedPrice: number;
+            upperBand: number;
+            lowerBand: number;
+            middleLine: number;
+        };
+        channel: {
+            standardDeviation: number;
+            channelWidth: number;
+            distanceFromUpper: number;
+            distanceFromLower: number;
+        };
+        signal: {
+            action: 'BUY' | 'SELL' | 'HOLD';
+            strength: number;
+            explanation: string;
+        };
+        metadata: {
+            calculatedAt: string;
+            modelType: string;
+            confidenceInterval: string;
+        };
+    };
+
+    type LinearRegressionChannelProps = {
+        symbol: string;
+        className?: string;
     };
 }
 
